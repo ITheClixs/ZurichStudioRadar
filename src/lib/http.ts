@@ -6,6 +6,7 @@ const DEFAULT_HEADERS = {
     "AccommodationScript/0.1 (+local Next.js rental aggregator; public-source fetch for Zurich studio listings)",
   accept: "application/json,text/html,application/xhtml+xml"
 };
+const MAX_RATE_LIMIT_WAIT_MS = 10000;
 
 async function performFetch(url: string, init: RequestInit = {}): Promise<Response> {
   return fetch(url, {
@@ -52,6 +53,11 @@ async function fetchWithRetries(
 
       if (response.status === 429 && attempt < 5) {
         const delayMs = parseRetryDelayMs(response.headers.get("retry-after"), attempt);
+        if (delayMs > MAX_RATE_LIMIT_WAIT_MS) {
+          throw new Error(
+            `429 Too Many Requests (Retry-After ${Math.round(delayMs / 1000)}s exceeds ${Math.round(MAX_RATE_LIMIT_WAIT_MS / 1000)}s limit)`
+          );
+        }
         logger.warn("HTTP request rate limited", {
           label,
           url,

@@ -63,6 +63,7 @@ How it is used:
 - It keeps only listings whose municipality can be validated inside the Canton of Zurich.
 - For likely candidates, it fetches the public listing HTML to extract image URLs, detail rows, and gallery captions.
 - The final strict classifier decides whether the listing is a true studio.
+- The crawler is intentionally polite and includes retry / backoff behavior for source throttling.
 
 ## Excluded Sources And Why
 
@@ -132,6 +133,7 @@ Behavior:
 
 - normal page loads read the local cache
 - refreshing listings rewrites the cache
+- if a live refresh fully fails and a previous successful cache exists, the app preserves the previous cache instead of replacing it with an empty result
 - the UI shows cache age and last scrape time
 - repeated page loads do not hit upstream sources unless a refresh is triggered
 
@@ -162,6 +164,21 @@ npm run typecheck
 npm run build
 npm start
 ```
+
+Optional crawl tuning environment variables:
+
+```bash
+FLATFOX_MAX_PAGES=25
+FLATFOX_PAGE_DELAY_MS=150
+FLATFOX_DETAIL_DELAY_MS=250
+FLATFOX_DETAIL_CONCURRENCY=2
+```
+
+Notes:
+
+- By default, the Flatfox adapter attempts a full-feed scan.
+- `FLATFOX_MAX_PAGES` is intended for local development or controlled bounded refreshes when you explicitly want to cap source pagination.
+- Lower concurrency and non-zero delays reduce the risk of tripping source-side throttling.
 
 ## Frontend Features
 
@@ -228,6 +245,7 @@ Normalized listings include:
 - Flatfox’s public listing endpoint does not expose image URLs directly, so thumbnails are enriched from public listing HTML for candidate listings only.
 - The classifier is intentionally conservative. Some valid studios may be excluded if the source text never explicitly proves private bathroom and private kitchen facilities.
 - A full refresh can take noticeable time because the Flatfox source must be paginated first and then candidate detail pages must be fetched.
+- As observed on **March 23, 2026**, Flatfox can return `429 Too Many Requests` with long `Retry-After` values from this environment. The app now fails fast, records the source error clearly, and preserves the last successful cache when one exists.
 
 ## What Was Implemented
 
@@ -250,5 +268,12 @@ The project is intended to be verified locally with:
 - `npm run typecheck`
 - `npm run build`
 - a live refresh through the UI or `POST /api/refresh`
+
+Verified during implementation on **March 23, 2026**:
+
+- `npm run typecheck`
+- `npm run build`
+- local server startup
+- live `POST /api/refresh` behavior against Flatfox, including the current `429` failure path and structured source error reporting
 
 Because listing inventories change continuously, the exact accepted listing count will vary by refresh time.
