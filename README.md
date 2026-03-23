@@ -2,7 +2,7 @@
 
 Zurich Studio Radar is a local Next.js web application that aggregates publicly accessible rental listings for true self-contained studio apartments in the Canton of Zurich, Switzerland.
 
-The current production source coverage uses **Flatfox** and **UrbanHome**. The architecture supports multiple source adapters, but only sources that can be accessed reliably without login, paywall, or active anti-bot challenge are enabled.
+The current production source coverage uses **Flatfox**, **UrbanHome**, and **UMS**. The architecture supports multiple source adapters, but only sources that can be accessed reliably without login, paywall, or active anti-bot challenge are enabled.
 
 ## What The Application Does
 
@@ -37,6 +37,10 @@ Relevant modules:
   UrbanHome public search adapter, room-bounded pagination, detail-page enrichment.
 - `src/lib/sources/urbanhome/extract.ts`
   UrbanHome result-card and detail-page extraction.
+- `src/lib/sources/ums/adapter.ts`
+  UMS source adapter for public Zurich-region furnished apartment listings.
+- `src/lib/sources/ums/extract.ts`
+  UMS result-card and detail-page extraction.
 - `src/lib/classification/studio.ts`
   Strict studio classification logic.
 - `src/lib/classification/location.ts`
@@ -91,6 +95,20 @@ How it is used:
 - Detail pages are fetched only for those bounded candidates.
 - The same strict studio and Canton Zurich validators are then applied before acceptance.
 
+### UMS
+
+Why it is enabled:
+
+- Public city listing indexes are server-rendered and accessible without login.
+- Detail pages are public and expose explicit kitchen and bathroom sections.
+- The Zurich-region feeds contain real studio and one-room listings inside the Canton of Zurich.
+
+How it is used:
+
+- The adapter crawls the public Zurich and Winterthur UMS result pages.
+- It keeps only studio and one-room candidates before detail-page enrichment.
+- Detail pages contribute feature rows like `Küche` and `Bad / Dusche / WC`, which are then fed into the strict classifier.
+
 ## Excluded Sources And Why
 
 As of **March 23, 2026**, the following sources were intentionally not enabled:
@@ -99,6 +117,8 @@ As of **March 23, 2026**, the following sources were intentionally not enabled:
   Public listing pages returned a Cloudflare challenge instead of usable content during implementation. The app does not fake support for blocked sources.
 - **Ron Orp**
   The public housing market page was reachable, but the actual market content was not exposed in a stable server-rendered payload. It also mixes WG/shared-room inventory heavily, which makes strict high-precision extraction materially more brittle without a stable public endpoint.
+- **WOKO**
+  WOKO has public pages and some qualifying studios do exist, but from this environment their site returned CloudFront `403 Request blocked` responses for live page fetches. Because the source is blocked and much of the inventory is shared student housing, it is documented rather than presented as supported.
 
 ## Studio Filtering Logic
 
@@ -129,10 +149,11 @@ Examples of negative indicators:
 - `room in a shared flat`
 - `shared kitchen`
 - `shared bathroom`
-- `Mitbenutzung`
 - `co living`
 
 Ambiguous listings are excluded.
+
+Shared laundry alone is **not** treated as a disqualifier. Listings are rejected for shared housing when the evidence points to shared living space, shared kitchen, or shared bathroom.
 
 ## Canton Zurich Validation Logic
 
@@ -201,14 +222,20 @@ URBANHOME_MAX_PAGES=8
 URBANHOME_PAGE_DELAY_MS=120
 URBANHOME_DETAIL_DELAY_MS=180
 URBANHOME_DETAIL_CONCURRENCY=2
+UMS_MAX_PAGES_PER_REGION=8
+UMS_PAGE_DELAY_MS=150
+UMS_DETAIL_DELAY_MS=200
+UMS_DETAIL_CONCURRENCY=2
 ```
 
 Notes:
 
 - By default, the Flatfox adapter attempts a full-feed scan.
 - By default, the UrbanHome adapter scans up to 8 result pages of 25 rows each for the bounded `1.0` to `1.5` room search.
+- By default, the UMS adapter scans up to 8 pages for each supported Zurich-region feed.
 - `FLATFOX_MAX_PAGES` is intended for local development or controlled bounded refreshes when you explicitly want to cap source pagination.
 - `URBANHOME_MAX_PAGES` is intended for the same reason when you want to bound UrbanHome refreshes.
+- `UMS_MAX_PAGES_PER_REGION` is intended for the same reason when you want to bound UMS pagination.
 - Lower concurrency and non-zero delays reduce the risk of tripping source-side throttling.
 
 ## Frontend Features
@@ -272,7 +299,7 @@ Normalized listings include:
 
 ## Limitations
 
-- Current live coverage includes **Flatfox** and **UrbanHome**.
+- Current live coverage includes **Flatfox**, **UrbanHome**, and **UMS**.
 - Flatfox’s public listing endpoint does not expose image URLs directly, so thumbnails are enriched from public listing HTML for candidate listings only.
 - The classifier is intentionally conservative. Some valid studios may be excluded if the source text never explicitly proves private bathroom and private kitchen facilities.
 - A full refresh can take noticeable time because both sources require detail-page enrichment for high-confidence filtering.
@@ -285,6 +312,7 @@ Normalized listings include:
 - source adapter architecture
 - production Flatfox adapter
 - production UrbanHome adapter
+- production UMS adapter
 - official Canton Zurich municipality validation
 - strict studio classification
 - deduplication
@@ -310,6 +338,7 @@ Verified during implementation on **March 23, 2026**:
 - local server startup
 - live `POST /api/refresh` behavior against Flatfox and UrbanHome
 - live UrbanHome acceptance of real Canton Zurich studio listings
+- live UMS acceptance of real Canton Zurich studio listings
 - Flatfox search-page HTML fallback investigation, confirming it does not expose a usable server-rendered listing payload
 
 Because listing inventories change continuously, the exact accepted listing count will vary by refresh time.

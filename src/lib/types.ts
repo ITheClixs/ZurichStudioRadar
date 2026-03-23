@@ -1,4 +1,4 @@
-export type SourceName = "Flatfox" | "UrbanHome";
+export type SourceName = "Flatfox" | "UrbanHome" | "UMS";
 
 export type ListingTypeClassification = "studio";
 
