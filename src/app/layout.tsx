@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Zurich Studio Radar",
+  title: "ZurichStudioRadar",
   description: "Local rental listing aggregator for true studio apartments in the Canton of Zurich."
 };
 

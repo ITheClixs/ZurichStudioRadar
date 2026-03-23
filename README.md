@@ -1,6 +1,6 @@
-# Zurich Studio Radar
+# ZurichStudioRadar
 
-Zurich Studio Radar is a local Next.js web application that aggregates publicly accessible rental listings for true self-contained studio apartments in the Canton of Zurich, Switzerland.
+ZurichStudioRadar is a local Next.js web application that aggregates publicly accessible rental listings for true self-contained studio apartments in the Canton of Zurich, Switzerland.
 
 The current production source coverage uses **Flatfox**, **UrbanHome**, and **UMS**. The architecture supports multiple source adapters, but only sources that can be accessed reliably without login, paywall, or active anti-bot challenge are enabled.
 

@@ -132,7 +132,7 @@ export function ListingsDashboard({ initialSnapshot }: { initialSnapshot: Aggreg
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="eyebrow">Local Zurich Rental Intelligence</p>
-          <h1>Zurich Studio Radar</h1>
+          <h1>ZurichStudioRadar</h1>
           <p className="hero-text">
             Strictly filtered, self-contained studio apartments in the Canton of Zurich. Shared
             flats, WG rooms, and ambiguous listings are excluded by design.
