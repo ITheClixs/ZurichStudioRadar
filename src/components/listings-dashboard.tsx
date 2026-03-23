@@ -51,7 +51,7 @@ export function ListingsDashboard({ initialSnapshot }: { initialSnapshot: Aggreg
   );
 
   const sourceOptions = useMemo(
-    () => Array.from(new Set(snapshot.listings.map((listing) => listing.sourceName))),
+    () => Array.from(new Set(snapshot.listings.map((listing) => listing.sourceName))).sort(),
     [snapshot.listings]
   );
 
@@ -156,7 +156,7 @@ export function ListingsDashboard({ initialSnapshot }: { initialSnapshot: Aggreg
             value={String(new Set(snapshot.listings.map((listing) => listing.municipality)).size)}
           />
           <StatCard
-            label="Last scrape"
+            label="Last refresh"
             value={
               snapshot.generatedAt === new Date(0).toISOString()
                 ? "Not run yet"
@@ -165,6 +165,23 @@ export function ListingsDashboard({ initialSnapshot }: { initialSnapshot: Aggreg
           />
         </div>
       </section>
+
+      {snapshot.staleCache.active ? (
+        <section className="stale-banner">
+          <div>
+            <strong>Showing cached listings for source failures.</strong>
+            <p>
+              {snapshot.staleCache.reusedSources.map((source) => source.reason).join(" ")}
+            </p>
+          </div>
+          <span className="stale-banner__meta">
+            Last live attempt:{" "}
+            {snapshot.staleCache.lastRefreshAttemptedAt
+              ? new Date(snapshot.staleCache.lastRefreshAttemptedAt).toLocaleString()
+              : "n/a"}
+          </span>
+        </section>
+      ) : null}
 
       <section className="status-panel">
         {snapshot.sourceStatus.length === 0 ? (
@@ -180,14 +197,20 @@ export function ListingsDashboard({ initialSnapshot }: { initialSnapshot: Aggreg
                 <span>{source.status.toUpperCase()}</span>
               </div>
               <p>
-                fetched {source.fetchedCount} raw listings, kept {source.acceptedCount} validated
-                studios in {Math.round(source.durationMs / 1000)}s
+                fetched {source.fetchedCount} raw listings, kept {source.acceptedCount} live validated
+                studios, reused {source.cachedListingCount} cached listings in{" "}
+                {Math.round(source.durationMs / 1000)}s
               </p>
-              {source.errors.length > 0 ? (
-                <p className="source-card__error">{source.errors[0]}</p>
-              ) : (
+              {source.nextRetryAt ? (
+                <p className="source-card__retry">
+                  Next retry after {new Date(source.nextRetryAt).toLocaleTimeString()} (
+                  {formatRetryAfter(source.retryAfterSeconds)})
+                </p>
+              ) : null}
+              {source.errors.length > 0 ? <p className="source-card__error">{source.errors[0]}</p> : null}
+              {source.notes.length > 0 ? (
                 <p className="source-card__note">{source.notes.join(" ")}</p>
-              )}
+              ) : null}
             </article>
           ))
         )}
@@ -387,4 +410,18 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function formatRetryAfter(retryAfterSeconds: number | null): string {
+  if (retryAfterSeconds === null) {
+    return "retry window unavailable";
+  }
+
+  const minutes = Math.floor(retryAfterSeconds / 60);
+  const seconds = retryAfterSeconds % 60;
+  if (minutes <= 0) {
+    return `about ${seconds}s`;
+  }
+
+  return `about ${minutes}m ${seconds}s`;
 }
