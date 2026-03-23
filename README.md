@@ -302,7 +302,7 @@ Normalized listings include:
 - Current live coverage includes **Flatfox**, **UrbanHome**, and **UMS**.
 - Flatfox’s public listing endpoint does not expose image URLs directly, so thumbnails are enriched from public listing HTML for candidate listings only.
 - The classifier is intentionally conservative. Some valid studios may be excluded if the source text never explicitly proves private bathroom and private kitchen facilities.
-- A full refresh can take noticeable time because both sources require detail-page enrichment for high-confidence filtering.
+- A full refresh can take noticeable time because all enabled sources rely on detail-page enrichment for high-confidence filtering.
 - As observed on **March 23, 2026**, Flatfox can return `429 Too Many Requests` with long `Retry-After` values from this environment. The app fails fast, records the source error clearly, preserves cached Flatfox listings when available, and exposes the next retry window in the UI.
 - I tested Flatfox’s public search HTML as a fallback path. It renders only an application shell and client bootstrap data, not a usable server-rendered listing payload, so it is not used as a bypass.
 
@@ -336,9 +336,10 @@ Verified during implementation on **March 23, 2026**:
 - `npm run typecheck`
 - `npm run build`
 - local server startup
-- live `POST /api/refresh` behavior against Flatfox and UrbanHome
+- live `POST /api/refresh` behavior against Flatfox, UrbanHome, and UMS
 - live UrbanHome acceptance of real Canton Zurich studio listings
 - live UMS acceptance of real Canton Zurich studio listings
+- live bounded refresh resulting in 9 accepted listings from the current source mix
 - Flatfox search-page HTML fallback investigation, confirming it does not expose a usable server-rendered listing payload
 
 Because listing inventories change continuously, the exact accepted listing count will vary by refresh time.
