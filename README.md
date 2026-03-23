@@ -2,7 +2,7 @@
 
 Zurich Studio Radar is a local Next.js web application that aggregates publicly accessible rental listings for true self-contained studio apartments in the Canton of Zurich, Switzerland.
 
-The current production source coverage uses **Flatfox**. The architecture supports multiple source adapters, but only sources that can be accessed reliably without login, paywall, or active anti-bot challenge are enabled.
+The current production source coverage uses **Flatfox** and **UrbanHome**. The architecture supports multiple source adapters, but only sources that can be accessed reliably without login, paywall, or active anti-bot challenge are enabled.
 
 ## What The Application Does
 
@@ -33,12 +33,18 @@ Relevant modules:
   Flatfox source adapter, pagination, coarse filtering, detail-page enrichment.
 - `src/lib/sources/flatfox/extract.ts`
   Listing HTML extraction for images, detail rows, and gallery captions.
+- `src/lib/sources/urbanhome/adapter.ts`
+  UrbanHome public search adapter, room-bounded pagination, detail-page enrichment.
+- `src/lib/sources/urbanhome/extract.ts`
+  UrbanHome result-card and detail-page extraction.
 - `src/lib/classification/studio.ts`
   Strict studio classification logic.
 - `src/lib/classification/location.ts`
   Canton Zurich validator using the official municipality list.
 - `src/lib/cache.ts`
   Local cache persistence under `data/cache/listings-cache.json`.
+- `src/lib/aggregation.ts`
+  Cross-source aggregation, deduplication, and stale-source cache reuse when a live source fails.
 - `src/app/api/listings/route.ts`
   Read aggregated listings.
 - `src/app/api/refresh/route.ts`
@@ -46,7 +52,7 @@ Relevant modules:
 - `src/components/listings-dashboard.tsx`
   Main frontend UI.
 
-## Supported Source
+## Supported Sources
 
 ### Flatfox
 
@@ -65,6 +71,26 @@ How it is used:
 - The final strict classifier decides whether the listing is a true studio.
 - The crawler is intentionally polite and includes retry / backoff behavior for source throttling.
 
+Known limitation:
+
+- As observed on **March 23, 2026**, Flatfox can return Cloudflare `Error 1015` rate limits for the public listing API from this environment.
+- The app now exposes the `Retry-After` window explicitly and keeps previously cached Flatfox listings visible if a later refresh is blocked.
+
+### UrbanHome
+
+Why it is enabled:
+
+- Public search results are accessible without login.
+- The site exposes a working public search POST endpoint.
+- Listing detail pages are publicly accessible and contain enough metadata and description text for strict filtering.
+
+How it is used:
+
+- The adapter calls the public `/Search/DoSearch` endpoint with Canton Zurich and `1.0` to `1.5` room apartment constraints.
+- The returned result cards are parsed into listing seeds.
+- Detail pages are fetched only for those bounded candidates.
+- The same strict studio and Canton Zurich validators are then applied before acceptance.
+
 ## Excluded Sources And Why
 
 As of **March 23, 2026**, the following sources were intentionally not enabled:
@@ -73,8 +99,6 @@ As of **March 23, 2026**, the following sources were intentionally not enabled:
   Public listing pages returned a Cloudflare challenge instead of usable content during implementation. The app does not fake support for blocked sources.
 - **Ron Orp**
   The public housing market page was reachable, but the actual market content was not exposed in a stable server-rendered payload. It also mixes WG/shared-room inventory heavily, which makes strict high-precision extraction materially more brittle without a stable public endpoint.
-- **UrbanHome**
-  Public result URLs tested during implementation were unstable or returned non-result pages, and the exposed RSS endpoint did not provide listing items. It is therefore omitted rather than presented as supported.
 
 ## Studio Filtering Logic
 
@@ -133,8 +157,9 @@ Behavior:
 
 - normal page loads read the local cache
 - refreshing listings rewrites the cache
+- if a live source fails but a previous cache contains listings from that source, the app reuses those source-specific cached listings instead of dropping them from the UI
 - if a live refresh fully fails and a previous successful cache exists, the app preserves the previous cache instead of replacing it with an empty result
-- the UI shows cache age and last scrape time
+- the UI shows cache age, the last refresh attempt, which sources are currently served from stale cache, and the next retry time when the source reports one
 - repeated page loads do not hit upstream sources unless a refresh is triggered
 
 ## Run Locally
@@ -172,12 +197,18 @@ FLATFOX_MAX_PAGES=25
 FLATFOX_PAGE_DELAY_MS=150
 FLATFOX_DETAIL_DELAY_MS=250
 FLATFOX_DETAIL_CONCURRENCY=2
+URBANHOME_MAX_PAGES=8
+URBANHOME_PAGE_DELAY_MS=120
+URBANHOME_DETAIL_DELAY_MS=180
+URBANHOME_DETAIL_CONCURRENCY=2
 ```
 
 Notes:
 
 - By default, the Flatfox adapter attempts a full-feed scan.
+- By default, the UrbanHome adapter scans up to 8 result pages of 25 rows each for the bounded `1.0` to `1.5` room search.
 - `FLATFOX_MAX_PAGES` is intended for local development or controlled bounded refreshes when you explicitly want to cap source pagination.
+- `URBANHOME_MAX_PAGES` is intended for the same reason when you want to bound UrbanHome refreshes.
 - Lower concurrency and non-zero delays reduce the risk of tripping source-side throttling.
 
 ## Frontend Features
@@ -241,23 +272,26 @@ Normalized listings include:
 
 ## Limitations
 
-- Current live coverage is limited to **Flatfox** because the other tested sources were blocked, unstable, or not suitable for strict public extraction at implementation time.
+- Current live coverage includes **Flatfox** and **UrbanHome**.
 - Flatfox’s public listing endpoint does not expose image URLs directly, so thumbnails are enriched from public listing HTML for candidate listings only.
 - The classifier is intentionally conservative. Some valid studios may be excluded if the source text never explicitly proves private bathroom and private kitchen facilities.
-- A full refresh can take noticeable time because the Flatfox source must be paginated first and then candidate detail pages must be fetched.
-- As observed on **March 23, 2026**, Flatfox can return `429 Too Many Requests` with long `Retry-After` values from this environment. The app now fails fast, records the source error clearly, and preserves the last successful cache when one exists.
+- A full refresh can take noticeable time because both sources require detail-page enrichment for high-confidence filtering.
+- As observed on **March 23, 2026**, Flatfox can return `429 Too Many Requests` with long `Retry-After` values from this environment. The app fails fast, records the source error clearly, preserves cached Flatfox listings when available, and exposes the next retry window in the UI.
+- I tested Flatfox’s public search HTML as a fallback path. It renders only an application shell and client bootstrap data, not a usable server-rendered listing payload, so it is not used as a bypass.
 
 ## What Was Implemented
 
 - Next.js TypeScript application scaffold
 - source adapter architecture
 - production Flatfox adapter
+- production UrbanHome adapter
 - official Canton Zurich municipality validation
 - strict studio classification
 - deduplication
 - local JSON cache persistence
 - backend API routes
 - polished searchable/filterable frontend
+- stale-cache source preservation and retry-after UX
 - source status reporting
 - serious README with source limitations and rationale
 
@@ -274,6 +308,8 @@ Verified during implementation on **March 23, 2026**:
 - `npm run typecheck`
 - `npm run build`
 - local server startup
-- live `POST /api/refresh` behavior against Flatfox, including the current `429` failure path and structured source error reporting
+- live `POST /api/refresh` behavior against Flatfox and UrbanHome
+- live UrbanHome acceptance of real Canton Zurich studio listings
+- Flatfox search-page HTML fallback investigation, confirming it does not expose a usable server-rendered listing payload
 
 Because listing inventories change continuously, the exact accepted listing count will vary by refresh time.
