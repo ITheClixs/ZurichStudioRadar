@@ -60,6 +60,7 @@ select {
 
 .hero-copy,
 .hero-stats,
+.stale-banner,
 .status-panel,
 .filters-panel,
 .error-panel,
@@ -185,6 +186,34 @@ select {
   margin-bottom: 24px;
 }
 
+.stale-banner {
+  border-radius: var(--radius-xl);
+  padding: 18px 22px;
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  background: rgba(255, 247, 225, 0.95);
+}
+
+.stale-banner strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.stale-banner p,
+.stale-banner__meta {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.stale-banner__meta {
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
 .source-card,
 .empty-status,
 .error-panel,
@@ -220,6 +249,16 @@ select {
 .source-card__error {
   margin-top: 10px !important;
   color: var(--warning) !important;
+}
+
+.source-card__retry {
+  margin-top: 10px !important;
+  color: var(--accent) !important;
+  font-weight: 700;
+}
+
+.source-card__note {
+  margin-top: 10px !important;
 }
 
 .source-card--ok {
@@ -403,6 +442,10 @@ select {
   .hero-panel,
   .listing-card {
     grid-template-columns: 1fr;
+  }
+
+  .stale-banner {
+    flex-direction: column;
   }
 
   .listing-card__media {
