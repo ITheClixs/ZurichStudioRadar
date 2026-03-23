@@ -150,12 +150,20 @@ export const flatfoxAdapter: SourceAdapter = {
         notes: [
           ...notes,
           `Scanned ${scannedPages} Flatfox API pages (${apiListings.length} raw records).`
-        ]
+        ],
+        retryAfterSeconds: null,
+        nextRetryAt: null,
+        usedCachedListings: false,
+        cachedListingCount: 0,
+        cachedGeneratedAt: null
       };
 
       return { listings: accepted, run };
     } catch (error) {
       const message = formatFlatfoxSourceError(error);
+      const retryAfterSeconds = getRetryAfterSeconds(error);
+      const nextRetryAt =
+        retryAfterSeconds !== null ? new Date(Date.now() + retryAfterSeconds * 1000).toISOString() : null;
       sourceLogger.error("Flatfox adapter failed", { error: message });
       return {
         listings: [],
@@ -167,7 +175,12 @@ export const flatfoxAdapter: SourceAdapter = {
           acceptedCount: 0,
           durationMs: Date.now() - startedAt,
           errors: [message],
-          notes
+          notes,
+          retryAfterSeconds,
+          nextRetryAt,
+          usedCachedListings: false,
+          cachedListingCount: 0,
+          cachedGeneratedAt: null
         }
       };
     }
@@ -348,8 +361,7 @@ function readNonNegativeIntEnv(name: string, fallback: number): number {
 
 function formatFlatfoxSourceError(error: unknown): string {
   if (error instanceof HttpRequestError && error.status === 429) {
-    const retryAfterSeconds =
-      error.retryAfterMs !== null ? Math.max(1, Math.round(error.retryAfterMs / 1000)) : null;
+    const retryAfterSeconds = getRetryAfterSeconds(error);
     return [
       "Flatfox is currently rate-limiting this machine via Cloudflare (Error 1015).",
       retryAfterSeconds !== null ? `Retry-After is about ${retryAfterSeconds}s.` : null,
@@ -360,4 +372,12 @@ function formatFlatfoxSourceError(error: unknown): string {
   }
 
   return String(error);
+}
+
+function getRetryAfterSeconds(error: unknown): number | null {
+  if (!(error instanceof HttpRequestError) || error.retryAfterMs === null) {
+    return null;
+  }
+
+  return Math.max(1, Math.round(error.retryAfterMs / 1000));
 }
