@@ -1,4 +1,4 @@
-export type SourceName = "Flatfox";
+export type SourceName = "Flatfox" | "UrbanHome";
 
 export type ListingTypeClassification = "studio";
 
@@ -62,7 +62,7 @@ export interface NormalizedListing {
 }
 
 export interface SourceRunResult {
-  sourceName: string;
+  sourceName: SourceName;
   status: SourceHealthStatus;
   fetchedCount: number;
   candidateCount: number;
@@ -70,6 +70,24 @@ export interface SourceRunResult {
   durationMs: number;
   errors: string[];
   notes: string[];
+  retryAfterSeconds: number | null;
+  nextRetryAt: string | null;
+  usedCachedListings: boolean;
+  cachedListingCount: number;
+  cachedGeneratedAt: string | null;
+}
+
+export interface StaleSourceSnapshot {
+  sourceName: SourceName;
+  listingCount: number;
+  cachedGeneratedAt: string;
+  reason: string;
+}
+
+export interface StaleCacheState {
+  active: boolean;
+  lastRefreshAttemptedAt: string | null;
+  reusedSources: StaleSourceSnapshot[];
 }
 
 export interface AggregationSnapshot {
@@ -77,4 +95,5 @@ export interface AggregationSnapshot {
   cacheAgeMinutes: number | null;
   listings: NormalizedListing[];
   sourceStatus: SourceRunResult[];
+  staleCache: StaleCacheState;
 }
