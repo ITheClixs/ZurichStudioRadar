@@ -10,6 +10,7 @@ import {
   formatIsoDate,
   normalizeWhitespace,
   numberOrNull,
+  sleep,
   runWithConcurrency,
   stringOrNull,
   truncateText
@@ -18,6 +19,10 @@ import {
 const FLATFOX_BASE_URL = "https://flatfox.ch";
 const FLATFOX_PUBLIC_LISTING_ENDPOINT = `${FLATFOX_BASE_URL}/api/v1/public-listing/`;
 const PAGE_SIZE = 100;
+const PAGE_DELAY_MS = readNonNegativeIntEnv("FLATFOX_PAGE_DELAY_MS", 150);
+const DETAIL_DELAY_MS = readNonNegativeIntEnv("FLATFOX_DETAIL_DELAY_MS", 250);
+const DETAIL_CONCURRENCY = readPositiveIntEnv("FLATFOX_DETAIL_CONCURRENCY", 2) ?? 2;
+const MAX_PAGES = readPositiveIntEnv("FLATFOX_MAX_PAGES");
 
 interface FlatfoxApiListing {
   pk: number;
@@ -70,9 +75,14 @@ export const flatfoxAdapter: SourceAdapter = {
       "Fetching public listing pages from Flatfox API.",
       "Fetching detail HTML only for likely Zurich studio candidates."
     ];
+    if (MAX_PAGES !== null) {
+      notes.push(`Flatfox page scan capped to ${MAX_PAGES} pages by FLATFOX_MAX_PAGES.`);
+    } else {
+      notes.push("Flatfox page scan runs across the full public feed unless FLATFOX_MAX_PAGES is set.");
+    }
 
     try {
-      const apiListings = await fetchAllPublicListings(sourceLogger);
+      const { listings: apiListings, scannedPages } = await fetchAllPublicListings(sourceLogger);
       sourceLogger.info("Fetched Flatfox listing pages", { count: apiListings.length });
 
       const cantonCandidates = apiListings
@@ -101,9 +111,13 @@ export const flatfoxAdapter: SourceAdapter = {
 
       const detailedListings = await runWithConcurrency(
         likelyCandidates,
-        4,
+        DETAIL_CONCURRENCY,
         async (candidate, index) => {
           try {
+            const batchIndex = Math.floor(index / DETAIL_CONCURRENCY);
+            if (batchIndex > 0 && DETAIL_DELAY_MS > 0) {
+              await sleep(batchIndex * DETAIL_DELAY_MS);
+            }
             const html = await fetchText(
               sourceLogger,
               `${FLATFOX_BASE_URL}${candidate.apiListing.url}`,
@@ -127,13 +141,16 @@ export const flatfoxAdapter: SourceAdapter = {
 
       const run: SourceRunResult = {
         sourceName: "Flatfox",
-        status: accepted.length > 0 ? "ok" : "error",
+        status: errors.length > 0 || MAX_PAGES !== null ? "partial" : accepted.length > 0 ? "ok" : "error",
         fetchedCount: apiListings.length,
         candidateCount: likelyCandidates.length,
         acceptedCount: accepted.length,
         durationMs: Date.now() - startedAt,
         errors,
-        notes
+        notes: [
+          ...notes,
+          `Scanned ${scannedPages} Flatfox API pages (${apiListings.length} raw records).`
+        ]
       };
 
       return { listings: accepted, run };
@@ -157,20 +174,40 @@ export const flatfoxAdapter: SourceAdapter = {
   }
 };
 
-async function fetchAllPublicListings(logger: Logger): Promise<FlatfoxApiListing[]> {
-  const firstPage = await fetchPage(0, logger);
-  const totalPages = Math.ceil(firstPage.count / PAGE_SIZE);
-  const offsets = Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) => (index + 1) * PAGE_SIZE);
+async function fetchAllPublicListings(
+  logger: Logger
+): Promise<{ listings: FlatfoxApiListing[]; scannedPages: number }> {
+  const pages: FlatfoxPageResponse[] = [];
+  let offset = 0;
 
-  const remainingPages = await runWithConcurrency(offsets, 5, async (offset) => fetchPage(offset, logger));
-  const allListings = [firstPage, ...remainingPages].flatMap((page) => page.results);
+  while (true) {
+    if (pages.length > 0 && PAGE_DELAY_MS > 0) {
+      await sleep(PAGE_DELAY_MS);
+    }
+
+    const page = await fetchPage(offset, logger);
+    pages.push(page);
+
+    const reachedConfiguredCap = MAX_PAGES !== null && pages.length >= MAX_PAGES;
+    const reachedLastPage = page.next === null || page.results.length < PAGE_SIZE;
+    if (reachedConfiguredCap || reachedLastPage) {
+      break;
+    }
+
+    offset += PAGE_SIZE;
+  }
+
+  const allListings = pages.flatMap((page) => page.results);
   const deduped = new Map<number, FlatfoxApiListing>();
 
   for (const listing of allListings) {
     deduped.set(listing.pk, listing);
   }
 
-  return Array.from(deduped.values());
+  return {
+    listings: Array.from(deduped.values()),
+    scannedPages: pages.length
+  };
 }
 
 async function fetchPage(offset: number, logger: Logger): Promise<FlatfoxPageResponse> {
@@ -279,4 +316,32 @@ function buildNormalizedListing(
       ].filter(Boolean)
     }
   };
+}
+
+function readPositiveIntEnv(name: string, fallback: number | null = null): number | null {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function readNonNegativeIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
 }

@@ -19,32 +19,70 @@ async function performFetch(url: string, init: RequestInit = {}): Promise<Respon
   });
 }
 
+function parseRetryDelayMs(retryAfterHeader: string | null, attempt: number): number {
+  if (retryAfterHeader) {
+    const seconds = Number.parseInt(retryAfterHeader, 10);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return seconds * 1000;
+    }
+
+    const absoluteDateMs = Date.parse(retryAfterHeader);
+    if (Number.isFinite(absoluteDateMs)) {
+      return Math.max(0, absoluteDateMs - Date.now());
+    }
+  }
+
+  return Math.min(15000, 500 * 2 ** (attempt - 1));
+}
+
+async function fetchWithRetries(
+  logger: Logger,
+  url: string,
+  init: RequestInit,
+  label: string
+): Promise<Response> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      const response = await performFetch(url, init);
+      if (response.ok) {
+        return response;
+      }
+
+      if (response.status === 429 && attempt < 5) {
+        const delayMs = parseRetryDelayMs(response.headers.get("retry-after"), attempt);
+        logger.warn("HTTP request rate limited", {
+          label,
+          url,
+          attempt,
+          delayMs
+        });
+        await sleep(delayMs);
+        continue;
+      }
+
+      throw new Error(`${response.status} ${response.statusText}`);
+    } catch (error) {
+      lastError = error;
+      logger.warn("HTTP request failed", { label, url, attempt, error: String(error) });
+      if (attempt < 5) {
+        await sleep(Math.min(10000, 350 * 2 ** (attempt - 1)));
+      }
+    }
+  }
+
+  throw new Error(`Failed request for ${label}: ${String(lastError)}`);
+}
+
 export async function fetchJson<T>(
   logger: Logger,
   url: string,
   init: RequestInit = {},
   label = "request"
 ): Promise<T> {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const response = await performFetch(url, init);
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText}`);
-      }
-
-      return (await response.json()) as T;
-    } catch (error) {
-      lastError = error;
-      logger.warn("HTTP JSON request failed", { label, url, attempt, error: String(error) });
-      if (attempt < 3) {
-        await sleep(250 * attempt);
-      }
-    }
-  }
-
-  throw new Error(`Failed to fetch JSON for ${label}: ${String(lastError)}`);
+  const response = await fetchWithRetries(logger, url, init, label);
+  return (await response.json()) as T;
 }
 
 export async function fetchText(
@@ -53,24 +91,6 @@ export async function fetchText(
   init: RequestInit = {},
   label = "request"
 ): Promise<string> {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const response = await performFetch(url, init);
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText}`);
-      }
-
-      return await response.text();
-    } catch (error) {
-      lastError = error;
-      logger.warn("HTTP text request failed", { label, url, attempt, error: String(error) });
-      if (attempt < 3) {
-        await sleep(250 * attempt);
-      }
-    }
-  }
-
-  throw new Error(`Failed to fetch text for ${label}: ${String(lastError)}`);
+  const response = await fetchWithRetries(logger, url, init, label);
+  return await response.text();
 }

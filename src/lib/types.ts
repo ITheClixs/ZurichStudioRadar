@@ -2,7 +2,7 @@ export type SourceName = "Flatfox";
 
 export type ListingTypeClassification = "studio";
 
-export type SourceHealthStatus = "ok" | "error" | "unsupported";
+export type SourceHealthStatus = "ok" | "partial" | "error" | "unsupported";
 
 export interface ClassificationReason {
   code: string;

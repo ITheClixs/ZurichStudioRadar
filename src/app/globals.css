@@ -226,6 +226,10 @@ select {
   background: rgba(241, 252, 247, 0.92);
 }
 
+.source-card--partial {
+  background: rgba(255, 248, 231, 0.95);
+}
+
 .source-card--error {
   background: rgba(255, 244, 241, 0.92);
 }
