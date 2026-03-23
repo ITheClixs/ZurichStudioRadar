@@ -8,6 +8,19 @@ const DEFAULT_HEADERS = {
 };
 const MAX_RATE_LIMIT_WAIT_MS = 10000;
 
+export class HttpRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfterMs: number | null = null,
+    readonly bodySnippet: string | null = null,
+    readonly isTerminal = false
+  ) {
+    super(message);
+    this.name = "HttpRequestError";
+  }
+}
+
 async function performFetch(url: string, init: RequestInit = {}): Promise<Response> {
   return fetch(url, {
     ...init,
@@ -51,26 +64,54 @@ async function fetchWithRetries(
         return response;
       }
 
-      if (response.status === 429 && attempt < 5) {
+      const bodySnippet = (await response.text()).slice(0, 300);
+
+      if (response.status === 429) {
         const delayMs = parseRetryDelayMs(response.headers.get("retry-after"), attempt);
-        if (delayMs > MAX_RATE_LIMIT_WAIT_MS) {
-          throw new Error(
-            `429 Too Many Requests (Retry-After ${Math.round(delayMs / 1000)}s exceeds ${Math.round(MAX_RATE_LIMIT_WAIT_MS / 1000)}s limit)`
-          );
+        const isCloudflare1015 =
+          bodySnippet.includes("Error 1015") || bodySnippet.includes("rate-limited by the website owner");
+        const message =
+          delayMs > MAX_RATE_LIMIT_WAIT_MS
+            ? `429 Too Many Requests${isCloudflare1015 ? " (Cloudflare Error 1015)" : ""} (Retry-After ${Math.round(delayMs / 1000)}s exceeds ${Math.round(MAX_RATE_LIMIT_WAIT_MS / 1000)}s limit)`
+            : `429 Too Many Requests${isCloudflare1015 ? " (Cloudflare Error 1015)" : ""}`;
+
+        if (delayMs > MAX_RATE_LIMIT_WAIT_MS || attempt >= 5) {
+          throw new HttpRequestError(message, 429, delayMs, bodySnippet, true);
         }
+
         logger.warn("HTTP request rate limited", {
           label,
           url,
           attempt,
-          delayMs
+          delayMs,
+          bodySnippet
         });
         await sleep(delayMs);
         continue;
       }
 
-      throw new Error(`${response.status} ${response.statusText}`);
+      throw new HttpRequestError(
+        `${response.status} ${response.statusText}`,
+        response.status,
+        null,
+        bodySnippet,
+        response.status >= 400 && response.status < 500 && response.status !== 408
+      );
     } catch (error) {
       lastError = error;
+      if (error instanceof HttpRequestError && error.isTerminal) {
+        logger.warn("HTTP request failed terminally", {
+          label,
+          url,
+          attempt,
+          status: error.status,
+          retryAfterMs: error.retryAfterMs,
+          error: error.message,
+          bodySnippet: error.bodySnippet
+        });
+        throw error;
+      }
+
       logger.warn("HTTP request failed", { label, url, attempt, error: String(error) });
       if (attempt < 5) {
         await sleep(Math.min(10000, 350 * 2 ** (attempt - 1)));

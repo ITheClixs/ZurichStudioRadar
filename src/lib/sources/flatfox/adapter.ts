@@ -1,6 +1,6 @@
 import { classifyStudioListing } from "@/lib/classification/studio";
 import { validateZurichCanton } from "@/lib/classification/location";
-import { fetchJson, fetchText } from "@/lib/http";
+import { fetchJson, fetchText, HttpRequestError } from "@/lib/http";
 import { Logger } from "@/lib/logger";
 import type { SourceAdapter } from "@/lib/sources/base";
 import { extractFlatfoxListingDetail } from "@/lib/sources/flatfox/extract";
@@ -155,7 +155,7 @@ export const flatfoxAdapter: SourceAdapter = {
 
       return { listings: accepted, run };
     } catch (error) {
-      const message = String(error);
+      const message = formatFlatfoxSourceError(error);
       sourceLogger.error("Flatfox adapter failed", { error: message });
       return {
         listings: [],
@@ -344,4 +344,20 @@ function readNonNegativeIntEnv(name: string, fallback: number): number {
   }
 
   return parsed;
+}
+
+function formatFlatfoxSourceError(error: unknown): string {
+  if (error instanceof HttpRequestError && error.status === 429) {
+    const retryAfterSeconds =
+      error.retryAfterMs !== null ? Math.max(1, Math.round(error.retryAfterMs / 1000)) : null;
+    return [
+      "Flatfox is currently rate-limiting this machine via Cloudflare (Error 1015).",
+      retryAfterSeconds !== null ? `Retry-After is about ${retryAfterSeconds}s.` : null,
+      "This is a source-side anti-bot / traffic-control response, not a frontend bug."
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return String(error);
 }
